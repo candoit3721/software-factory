@@ -1,0 +1,14 @@
+{
+  "name": "software-factory",
+  "description": "The software factory plugin for Claude Code.",
+  "owner": {
+    "name": "candoit3721"
+  },
+  "plugins": [
+    {
+      "name": "factory",
+      "source": "./",
+      "description": "Spec, build, review and approve loop for any repository."
+    }
+  ]
+}

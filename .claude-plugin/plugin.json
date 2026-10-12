@@ -1,0 +1,10 @@
+{
+  "name": "factory",
+  "version": "0.3.0",
+  "description": "A small, owned software factory: /factory:new runs spec, build, parallel review and approval agents with a deterministic board, git worktrees and a live all-projects dashboard.",
+  "author": {
+    "name": "candoit3721"
+  },
+  "repository": "https://github.com/candoit3721/software-factory",
+  "license": "MIT"
+}

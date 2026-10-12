@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Software Factory</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2311151c'/%3E%3Cpath d='M7 23V13l6 4v-4l6 4V9h6v14z' fill='%23f2b544'/%3E%3C/svg%3E" />
+    <style>
+      :root {
+        --bg: #0d1016;
+        --panel: #141922;
+        --card: #1a202b;
+        --card-hover: #202836;
+        --line: #273041;
+        --text: #e9edf4;
+        --muted: #9aa4b5;
+        --faint: #7d889b;
+        --pass: #3fcf8e;
+        --changes: #f2b544;
+        --missing: #7d889b;
+        --human: #ff7a8a;
+        --active: #6ea8ff;
+        --dot-l: 68%;
+        --radius: 12px;
+        --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+        color-scheme: dark;
+      }
+      @media (prefers-color-scheme: light) {
+        :root:not([data-theme='dark']) {
+          --bg: #f4f5f8;
+          --panel: #eceef3;
+          --card: #ffffff;
+          --card-hover: #f8f9fc;
+          --line: #d9dde6;
+          --text: #161a22;
+          --muted: #545d6e;
+          --faint: #6b7385;
+          --pass: #12865a;
+          --changes: #a66a00;
+          --missing: #6b7385;
+          --human: #c72f45;
+          --active: #2f6fdb;
+          --dot-l: 45%;
+          color-scheme: light;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 18px 24px 14px;
+      }
+      h1 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
+      .live { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+      .live i { width: 8px; height: 8px; border-radius: 50%; background: var(--pass); animation: pulse 2s infinite; }
+      .live.stale i { background: var(--human); animation: none; }
+      @keyframes pulse { 50% { opacity: 0.35; } }
+
+      .projects {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 0 24px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+      .project {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 34px;
+        padding: 5px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--muted);
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s, color 0.15s;
+      }
+      .project:hover { color: var(--text); border-color: var(--faint); }
+      .project[aria-pressed='true'] { background: var(--card); color: var(--text); border-color: var(--faint); }
+      .project:focus-visible, .card:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
+      .project .count { color: var(--faint); font-weight: 500; }
+      .project .alert {
+        padding: 0 7px;
+        border-radius: 999px;
+        background: var(--human);
+        color: var(--bg);
+        font-size: 11.5px;
+        font-weight: 700;
+      }
+      .project.is-missing { text-decoration: line-through; opacity: 0.7; }
+      .dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: hsl(var(--hue, 210) 70% var(--dot-l)); }
+
+      .board {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(210px, 1fr));
+        gap: 14px;
+        padding: 20px 24px 32px;
+        overflow-x: auto;
+      }
+      .column {
+        min-width: 0;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 12px;
+        min-height: 160px;
+      }
+      .column h2 {
+        display: flex;
+        justify-content: space-between;
+        margin: 2px 4px 12px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .column h2 b { color: var(--faint); font-weight: 600; }
+      .column[data-stage='needs-human'] h2 { color: var(--human); }
+      .cards { display: grid; gap: 10px; }
+      .card {
+        display: block;
+        width: 100%;
+        text-align: left;
+        font: inherit;
+        color: inherit;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 11px 12px;
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      .card:hover { background: var(--card-hover); border-color: var(--faint); }
+      .card[data-stage='needs-human'] { border-color: var(--human); }
+      .card-project {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 4px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 600;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .card-project .dot { width: 7px; height: 7px; }
+      .card-id { font: 12px var(--mono); color: var(--faint); }
+      .card-title { margin: 3px 0 8px; font-weight: 650; overflow-wrap: anywhere; }
+      .card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+      .chip {
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line);
+        font-size: 11.5px; font-weight: 600; white-space: nowrap;
+      }
+      .chip::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+      .v-PASS { color: var(--pass); }
+      .v-CHANGES { color: var(--changes); }
+      .v-MISSING { color: var(--missing); }
+      .working { color: var(--active); }
+      .empty { color: var(--faint); font-size: 13px; padding: 8px 4px; }
+      .note { margin-top: 8px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+      .welcome { max-width: 560px; margin: 48px auto; padding: 0 24px; color: var(--muted); }
+      .welcome h2 { color: var(--text); font-size: 18px; margin: 0 0 8px; }
+      .welcome code { font-family: var(--mono); color: var(--text); }
+
+      dialog {
+        width: min(880px, 100% - 32px);
+        max-height: calc(100vh - 48px);
+        padding: 0;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--panel);
+        color: var(--text);
+      }
+      dialog::backdrop { background: rgb(0 0 0 / 0.55); }
+      .drawer-head {
+        position: sticky; top: 0;
+        display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;
+        padding: 16px 20px; background: var(--panel); border-bottom: 1px solid var(--line);
+      }
+      .drawer-head h3 { margin: 2px 0 0; font-size: 17px; }
+      .drawer-head button {
+        font: inherit; color: var(--text); background: var(--card);
+        border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer;
+      }
+      .drawer-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+      .tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 20px 0; }
+      .tabs button {
+        font: 12px var(--mono); color: var(--muted); background: transparent;
+        border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; cursor: pointer;
+      }
+      .tabs button[aria-selected='true'] { color: var(--text); background: var(--card); border-color: var(--faint); }
+      pre {
+        margin: 12px 20px 20px; padding: 14px 16px;
+        background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+        font: 12.5px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere;
+      }
+      .timeline { margin: 0; padding: 4px 20px 20px 36px; color: var(--muted); font-size: 13px; }
+      .timeline li { margin: 3px 0; }
+      .timeline b { color: var(--text); font-weight: 600; }
+      .more {
+        width: 100%;
+        min-height: 34px;
+        border: 1px dashed var(--line);
+        border-radius: 10px;
+        background: transparent;
+        color: var(--muted);
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .more:hover { color: var(--text); border-color: var(--faint); }
+      @media (max-width: 720px) {
+        header { padding: 14px 16px 12px; }
+        .projects { padding: 0 16px 12px; }
+        .board { grid-template-columns: 1fr; padding: 16px; }
+        .column { min-height: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Software Factory</h1>
+      <span class="live" id="live"><i></i><span>Live</span></span>
+    </header>
+    <nav class="projects" id="projects" aria-label="Projects"></nav>
+    <main id="main"></main>
+    <dialog id="drawer" aria-labelledby="drawer-title">
+      <div class="drawer-head">
+        <div>
+          <div class="drawer-meta card-id" id="drawer-id"></div>
+          <h3 id="drawer-title"></h3>
+        </div>
+        <button type="button" id="drawer-close">Close</button>
+      </div>
+      <div class="tabs" id="drawer-tabs" role="tablist"></div>
+      <pre id="drawer-body"></pre>
+      <ol class="timeline" id="drawer-timeline"></ol>
+    </dialog>
+    <script>
+      const COLUMNS = [
+        ['spec', 'Spec'],
+        ['build', 'Build'],
+        ['review', 'Review'],
+        ['approve', 'Approve'],
+        ['needs-human', 'Needs human'],
+        ['merged', 'Merged'],
+      ];
+      const ACTIVE = new Set(['spec', 'build', 'review', 'approve', 'needs-human']);
+      const main = document.getElementById('main');
+      const nav = document.getElementById('projects');
+      const drawer = document.getElementById('drawer');
+      let projects = [];
+      let filter = new URLSearchParams(location.search).get('project') ?? 'all';
+      let open = null; // { key, id }
+      let openFile = null;
+      let showAllDone = false;
+      const DONE_LIMIT = 6;
+
+      const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+      const hue = (key) => [...key].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+      const ago = (iso) => {
+        const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+        if (s < 60) return `${s}s ago`;
+        if (s < 3600) return `${Math.round(s / 60)}m ago`;
+        if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+        return `${Math.round(s / 86400)}d ago`;
+      };
+
+      function renderNav() {
+        const activeCount = (list) => list.filter((j) => ACTIVE.has(j.stage)).length;
+        const humanCount = (list) => list.filter((j) => j.stage === 'needs-human').length;
+        const all = projects.flatMap((p) => p.jobs);
+        const chip = (key, label, jobs, extra = '') => {
+          const human = humanCount(jobs);
+          return `<button class="project${extra}" data-key="${esc(key)}" aria-pressed="${filter === key}">
+            ${key === 'all' ? '' : `<span class="dot" style="--hue:${hue(key)}"></span>`}
+            ${esc(label)} <span class="count">${activeCount(jobs)} active</span>
+            ${human ? `<span class="alert" title="${human} waiting for a human">${human}</span>` : ''}
+          </button>`;
+        };
+        nav.innerHTML =
+          chip('all', 'All projects', all) +
+          projects
+            .map((p) => chip(p.key, p.name, p.jobs, p.exists ? '' : ' is-missing'))
+            .join('');
+        nav.hidden = projects.length === 0;
+      }
+
+      function card(project, job) {
+        const verdicts = job.verdicts?.[job.round] ?? {};
+        const chips = (job.reviewers ?? [])
+          .map((lens) => {
+            const v = verdicts[lens];
+            if (v) return `<span class="chip v-${v}" title="${esc(lens)}: ${v}">${esc(lens)}</span>`;
+            return job.stage === 'review' ? `<span class="chip working" title="${esc(lens)}: reviewing">${esc(lens)}</span>` : '';
+          })
+          .join('');
+        const last = job.history?.[job.history.length - 1];
+        const note = job.stage === 'needs-human' && (job.decision?.reason || last?.note);
+        return `<button class="card" data-key="${esc(project.key)}" data-id="${esc(job.id)}" data-stage="${esc(job.stage)}">
+          ${filter === 'all' ? `<div class="card-project"><span class="dot" style="--hue:${hue(project.key)}"></span>${esc(project.name)}</div>` : ''}
+          <div class="card-id">${esc(job.id.slice(0, 3))} · ${job.round ? `round ${job.round}` : 'new'} · ${ago(job.updatedAt)}</div>
+          <div class="card-title">${esc(job.title)}</div>
+          <div class="card-meta">${chips}</div>
+          ${note ? `<div class="note">${esc(note)}</div>` : ''}
+        </button>`;
+      }
+
+      function renderBoard() {
+        if (projects.length === 0) {
+          main.innerHTML = `<div class="welcome"><h2>No factory projects yet</h2>
+            <p>Open Claude Code in a project and run <code>/factory:init</code>.
+            Projects appear here once they are set up or run their first job.</p></div>`;
+          return;
+        }
+        const shown = projects.filter((p) => filter === 'all' || p.key === filter);
+        const entries = shown
+          .flatMap((p) => p.jobs.map((job) => ({ project: p, job })))
+          .sort((a, b) => b.job.updatedAt.localeCompare(a.job.updatedAt));
+        main.innerHTML = `<div class="board">${COLUMNS.map(([stage, label]) => {
+          const inColumn = entries.filter(({ job }) => job.stage === stage || (stage === 'merged' && job.stage === 'discarded'));
+          // Finished work piles up; show the latest few unless asked.
+          const limit = stage === 'merged' && !showAllDone ? DONE_LIMIT : Infinity;
+          const hidden = Math.max(0, inColumn.length - limit);
+          const cards = inColumn.slice(0, limit).map(({ project, job }) => card(project, job)).join('');
+          const more = hidden
+            ? `<button class="more" data-action="show-done">Show ${hidden} older</button>`
+            : stage === 'merged' && showAllDone && inColumn.length > DONE_LIMIT
+              ? '<button class="more" data-action="show-done">Show fewer</button>'
+              : '';
+          return `<section class="column" data-stage="${stage}" aria-label="${label}">
+            <h2>${label} <b>${inColumn.length}</b></h2>
+            <div class="cards">${cards || '<div class="empty">Nothing here</div>'}${more}</div>
+          </section>`;
+        }).join('')}</div>`;
+      }
+
+      function render() {
+        if (filter !== 'all' && !projects.some((p) => p.key === filter)) filter = 'all';
+        const selected = projects.find((p) => p.key === filter);
+        document.title = selected ? `Factory · ${selected.name}` : 'Software Factory';
+        renderNav();
+        renderBoard();
+      }
+
+      async function refresh() {
+        const live = document.getElementById('live');
+        try {
+          const res = await fetch('/api/projects', { cache: 'no-store' });
+          projects = (await res.json()).projects ?? [];
+          render();
+          live.classList.remove('stale');
+          live.lastElementChild.textContent = 'Live';
+          if (open) await loadFiles(false);
+        } catch {
+          live.classList.add('stale');
+          live.lastElementChild.textContent = 'Disconnected';
+        }
+      }
+
+      async function loadFiles(reset) {
+        const project = projects.find((p) => p.key === open.key);
+        const job = project?.jobs.find((j) => j.id === open.id);
+        if (!job) return;
+        const res = await fetch(`/api/jobs/${encodeURIComponent(project.key)}/${encodeURIComponent(job.id)}`, { cache: 'no-store' });
+        const { files = [] } = await res.json();
+        document.getElementById('drawer-id').innerHTML =
+          `<span class="dot" style="--hue:${hue(project.key)}"></span>${esc(project.name)} · ${esc(job.id)} · ${esc(job.stage)} · round ${job.round}`;
+        document.getElementById('drawer-title').textContent = job.title;
+        if (reset || !files.some((f) => f.name === openFile)) openFile = files[files.length - 1]?.name ?? null;
+        document.getElementById('drawer-tabs').innerHTML = files
+          .map((f) => `<button role="tab" aria-selected="${f.name === openFile}" data-file="${esc(f.name)}">${esc(f.name)}</button>`)
+          .join('');
+        const file = files.find((f) => f.name === openFile);
+        document.getElementById('drawer-body').textContent = file ? file.content : 'No files yet.';
+        document.getElementById('drawer-timeline').innerHTML = (job.history ?? [])
+          .map((h) => `<li><b>${esc(h.stage)}</b> ${h.round ? `(round ${h.round}) ` : ''}${esc(h.note ?? '')} · ${new Date(h.at).toLocaleString()}</li>`)
+          .join('');
+      }
+
+      nav.addEventListener('click', (event) => {
+        const button = event.target.closest('.project');
+        if (!button) return;
+        filter = button.dataset.key;
+        const url = new URL(location.href);
+        if (filter === 'all') url.searchParams.delete('project');
+        else url.searchParams.set('project', filter);
+        history.replaceState(null, '', url);
+        render();
+      });
+      main.addEventListener('click', (event) => {
+        if (event.target.closest('[data-action="show-done"]')) {
+          showAllDone = !showAllDone;
+          renderBoard();
+          return;
+        }
+        const button = event.target.closest('.card');
+        if (!button) return;
+        open = { key: button.dataset.key, id: button.dataset.id };
+        loadFiles(true);
+        drawer.showModal();
+      });
+      document.getElementById('drawer-tabs').addEventListener('click', (event) => {
+        const tab = event.target.closest('[data-file]');
+        if (!tab) return;
+        openFile = tab.dataset.file;
+        loadFiles(false);
+      });
+      document.getElementById('drawer-close').addEventListener('click', () => drawer.close());
+      drawer.addEventListener('close', () => (open = null));
+
+      refresh();
+      setInterval(refresh, 2000);
+    </script>
+  </body>
+</html>
