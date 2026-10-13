@@ -44,11 +44,11 @@ function readJobs(root) {
   }
 }
 
-/** Whether the project's profile has a `preview` command, so the page can offer to start one. */
-function canPreview(root) {
+/** Whether the project's profile sets `key` (such as `preview` or `deploy`), so the page can show that step. */
+function profileHas(root, key) {
   try {
     const front = /^---\n([\s\S]*?)\n---/.exec(readFileSync(join(root, 'factory', 'profile.md'), 'utf8'));
-    return Boolean(front && /^preview:[ \t]*\S/m.test(front[1]));
+    return Boolean(front && new RegExp(`^${key}:[ \\t]*\\S`, 'm').test(front[1]));
   } catch {
     return false;
   }
@@ -60,7 +60,8 @@ function projects() {
     return {
       ...entry,
       ...status,
-      canPreview: status.exists && canPreview(entry.root),
+      canPreview: status.exists && profileHas(entry.root, 'preview'),
+      canDeploy: status.exists && profileHas(entry.root, 'deploy'),
       jobs: status.exists ? readJobs(entry.root) : [],
     };
   });

@@ -69,6 +69,17 @@ describe('dashboard API', () => {
     );
   });
 
+  it('says which projects have preview and deploy steps', async () => {
+    const root = join(sandbox, 'deployer');
+    mkdirSync(join(root, 'factory'), { recursive: true });
+    writeFileSync(join(root, 'factory', 'profile.md'), '---\nbase_branch: main\n# preview: off\ndeploy: git push origin main\n---\n');
+    const { key } = registerProject(root);
+    const { projects } = await (await fetch(`${base}/api/projects`)).json();
+    const deployer = projects.find((p) => p.key === key);
+    assert.deepEqual([deployer.canDeploy, deployer.canPreview], [true, false]);
+    assert.equal(projects.find((p) => p.name === 'alpha').canDeploy, false);
+  });
+
   it('serves a job file list, but only Markdown and logs', async () => {
     const res = await fetch(`${base}/api/jobs/${alpha.key}/001-a`);
     const { files } = await res.json();

@@ -103,7 +103,7 @@
 
       .board {
         display: grid;
-        grid-template-columns: repeat(6, minmax(210px, 1fr));
+        grid-template-columns: repeat(var(--columns, 6), minmax(170px, 1fr));
         gap: 14px;
         padding: 20px 24px 32px;
         overflow-x: auto;
@@ -128,6 +128,7 @@
       }
       .column h2 b { color: var(--faint); font-weight: 600; }
       .column[data-stage='needs-human'] h2 { color: var(--human); }
+      .column[data-stage='deploy'].has-failed h2 { color: var(--human); }
       .cards { display: grid; gap: 10px; }
       .card {
         display: block;
@@ -269,6 +270,7 @@
         ['review', 'Review'],
         ['approve', 'Approve'],
         ['needs-human', 'Needs human'],
+        ['deploy', 'Deploy'],
         ['merged', 'Merged'],
       ];
       const ACTIVE = new Set(['spec', 'build', 'review', 'approve', 'needs-human']);
@@ -294,8 +296,9 @@
       };
 
       function renderNav() {
-        const activeCount = (list) => list.filter((j) => ACTIVE.has(j.stage)).length;
-        const humanCount = (list) => list.filter((j) => j.stage === 'needs-human').length;
+        const activeCount = (list) => list.filter((j) => ACTIVE.has(j.stage) || j.deploy?.state === 'running').length;
+        const humanCount = (list) =>
+          list.filter((j) => j.stage === 'needs-human' || (j.stage === 'merged' && j.deploy?.state === 'failed')).length;
         const all = projects.flatMap((p) => p.jobs);
         const chip = (key, label, jobs, extra = '') => {
           const human = humanCount(jobs);
@@ -352,8 +355,20 @@
         const entries = shown
           .flatMap((p) => p.jobs.map((job) => ({ project: p, job })))
           .sort((a, b) => b.job.updatedAt.localeCompare(a.job.updatedAt));
-        main.innerHTML = `<div class="board">${COLUMNS.map(([stage, label]) => {
-          const inColumn = entries.filter(({ job }) => job.stage === stage || (stage === 'merged' && job.stage === 'discarded'));
+        // A merged job sits in Deploy until its deploy succeeds; discarded jobs end with the merged ones.
+        const columnOf = (job) =>
+          job.stage === 'merged' && ['running', 'failed'].includes(job.deploy?.state)
+            ? 'deploy'
+            : job.stage === 'discarded'
+              ? 'merged'
+              : job.stage;
+        // Show the Deploy column only where deploys are set up (or one is in it).
+        const columns = COLUMNS.filter(
+          ([stage]) => stage !== 'deploy' || shown.some((p) => p.canDeploy) || entries.some(({ job }) => columnOf(job) === 'deploy'),
+        );
+        main.innerHTML = `<div class="board" style="--columns:${columns.length}">${columns.map(([stage, label]) => {
+          const inColumn = entries.filter(({ job }) => columnOf(job) === stage);
+          const failed = inColumn.some(({ job }) => job.deploy?.state === 'failed');
           // Finished work piles up; show the latest few unless asked.
           const limit = stage === 'merged' && !showAllDone ? DONE_LIMIT : Infinity;
           const hidden = Math.max(0, inColumn.length - limit);
@@ -363,7 +378,7 @@
             : stage === 'merged' && showAllDone && inColumn.length > DONE_LIMIT
               ? '<button class="more" data-action="show-done">Show fewer</button>'
               : '';
-          return `<section class="column" data-stage="${stage}" aria-label="${label}">
+          return `<section class="column${failed ? ' has-failed' : ''}" data-stage="${stage}" aria-label="${label}">
             <h2>${label} <b>${inColumn.length}</b></h2>
             <div class="cards">${cards || '<div class="empty">Nothing here</div>'}${more}</div>
           </section>`;
