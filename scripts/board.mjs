@@ -16,6 +16,8 @@
  *   node board.mjs verify <id>             merge the base branch into the job, then run the profile's verify command
  *   node board.mjs merge <id>              merge the verified job into the base branch and clean up
  *   node board.mjs discard <id>            drop the worktree and branch
+ *   node board.mjs preview <id> [--open]   run the job's app from its worktree for a human to try
+ *   node board.mjs preview <id> --stop     stop it (merge, discard and leaving needs-human also stop it)
  *   node board.mjs next                    first open backlog item not claimed by a job
  *   node board.mjs list | show <id> | paths <id>
  *   node board.mjs register | unregister   add or remove this project on the all-projects dashboard
@@ -28,6 +30,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { basename, dirname, join, resolve } from 'node:path';
+import { answers, launchPreview, openInBrowser, processAlive, stopPreview, tail, waitForPreview } from './preview.mjs';
 import { projectKey, readRegistry, registerProject, unregisterProject } from './registry.mjs';
 
 const ROOT = process.cwd();
@@ -111,6 +114,7 @@ export function readProfile(path = PROFILE) {
     }
   }
   profile.max_rounds = Number(profile.max_rounds ?? 2);
+  profile.preview_timeout = Number(profile.preview_timeout ?? 180);
   return profile;
 }
 
@@ -147,9 +151,17 @@ function setStage(job, stage, note) {
   // Leaving the approve stage: record the approver's decision even if the
   // orchestrator skipped the "decision" command.
   if (job.stage === 'approve' && stage !== 'approve' && !job.decision) job.decision = readDecision(job);
+  // A preview is for reviewing a job that waits for a human; once it moves on, it would show stale work.
+  if (stage !== 'needs-human') endPreview(job);
   job.stage = stage;
   job.updatedAt = now();
   job.history.push({ at: job.updatedAt, stage, round: job.round, ...(note ? { note } : {}) });
+}
+
+function endPreview(job) {
+  if (!job.preview) return;
+  stopPreview(job.preview);
+  delete job.preview;
 }
 
 function worktreesDir() {
@@ -445,6 +457,7 @@ const commands = {
       fail(`${profile.base_branch} moved since verification; run "verify" again`);
     }
 
+    endPreview(job);
     git(['merge', '--no-ff', job.branch, '-m', `Merge ${job.branch}: ${job.title}`]);
     if (job.backlog && checkOffBacklog(job.backlog, job.id)) {
       git(['add', BACKLOG]);
@@ -461,11 +474,61 @@ const commands = {
   discard(args) {
     const board = readBoard();
     const job = getJob(board, args._[0]);
+    endPreview(job);
     tryGit(['worktree', 'remove', '--force', job.worktree]);
     tryGit(['branch', '-D', job.branch]);
     setStage(job, 'discarded', args.note);
     writeBoard(board);
     out({ id: job.id, stage: job.stage });
+  },
+
+  async preview(args) {
+    const job = getJob(readBoard(), args._[0]);
+    const save = (preview) =>
+      withLock(() => {
+        const fresh = readBoard();
+        const current = getJob(fresh, job.id);
+        if (preview) current.preview = preview;
+        else delete current.preview;
+        current.updatedAt = now();
+        writeBoard(fresh);
+      });
+
+    if (args.stop) {
+      const stopped = stopPreview(job.preview);
+      if (job.preview) save(null);
+      return out({ id: job.id, stopped });
+    }
+
+    const profile = readProfile();
+    if (!profile.preview) {
+      fail('factory/profile.md has no "preview" command; add one, for example: preview: npm run dev -- --port $FACTORY_PORT');
+    }
+    if (!['needs-human', 'approve', 'review', 'build'].includes(job.stage) || !existsSync(job.worktree)) {
+      fail(`job ${job.id} is ${job.stage} and has no worktree to preview`);
+    }
+    const head = git(['rev-parse', 'HEAD'], job.worktree);
+    const running = job.preview;
+    if (running && processAlive(running.pid) && running.commit === head && (await answers(running.url))) {
+      if (args.open) openInBrowser(running.url);
+      return out({ id: job.id, ...running, reused: true });
+    }
+    stopPreview(running); // stale: an older commit, or no longer answering
+
+    const port = await freePort();
+    const url = `http://localhost:${port}/`;
+    const log = join(JOBS, job.id, 'preview.log');
+    const pid = launchPreview(profile.preview, job.worktree, port, log);
+    const ready = await waitForPreview(pid, url, profile.preview_timeout * 1000);
+    if (!ready.ok) {
+      stopPreview({ pid });
+      save(null);
+      fail(`preview did not start: ${ready.reason}; see ${log}\n${tail(log)}`);
+    }
+    const preview = { pid, port, url, commit: head, at: now() };
+    save(preview);
+    if (args.open) openInBrowser(url);
+    out({ id: job.id, ...preview, log });
   },
 
   next() {
@@ -490,7 +553,8 @@ const commands = {
             .map(([lens, v]) => `${lens}:${v}`)
             .join(' ')
         : '';
-      return `${job.id.padEnd(46)} ${job.stage.padEnd(12)} r${job.round}  ${summary}`;
+      const preview = job.preview && processAlive(job.preview.pid) ? `  preview ${job.preview.url}` : '';
+      return `${job.id.padEnd(46)} ${job.stage.padEnd(12)} r${job.round}  ${summary}${preview}`;
     });
     out(rows.join('\n'));
   },
@@ -524,11 +588,14 @@ const commands = {
   },
 };
 
+const FLAGS = new Set(['open', 'stop']); // options without a value
+
 function parseArgs(argv) {
   const args = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg.startsWith('--')) {
+    if (FLAGS.has(arg.slice(2))) args[arg.slice(2)] = true;
+    else if (arg.startsWith('--')) {
       args[arg.slice(2)] = argv[i + 1];
       i++;
     } else args._.push(arg);
@@ -541,6 +608,6 @@ if (!command || !commands[command]) {
   fail(`usage: board.mjs <${Object.keys(commands).join('|')}> ...`, 2);
 }
 // Long-running commands take the lock only around their own board writes.
-const UNLOCKED = new Set(['setup', 'verify', 'list', 'show', 'paths', 'jobs', 'next', 'register', 'unregister', 'projects']);
+const UNLOCKED = new Set(['setup', 'verify', 'preview', 'list', 'show', 'paths', 'jobs', 'next', 'register', 'unregister', 'projects']);
 if (UNLOCKED.has(command)) await commands[command](parseArgs(rest));
 else withLock(() => commands[command](parseArgs(rest)));

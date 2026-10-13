@@ -32,7 +32,7 @@ describe('plugin structure', () => {
   });
 
   it('has the expected commands', () => {
-    assert.deepEqual(skills.sort(), ['approve', 'dashboard', 'discard', 'init', 'new', 'next', 'rework', 'status']);
+    assert.deepEqual(skills.sort(), ['approve', 'dashboard', 'discard', 'init', 'new', 'next', 'preview', 'rework', 'status']);
   });
 
   it('names every skill after its folder and describes it', () => {

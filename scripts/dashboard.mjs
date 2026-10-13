@@ -4,19 +4,25 @@
  *
  *   node dashboard.mjs [--port 4700]
  *
- * Projects come from the registry (see registry.mjs). The server is read-only
- * and binds to localhost: it reads each project's factory/board.json and
- * factory/jobs/<id>/*.md|log, nothing else.
+ * Projects come from the registry (see registry.mjs). The server binds to
+ * localhost and reads each project's factory/board.json and
+ * factory/jobs/<id>/*.md|log. Its one action, starting a review preview,
+ * goes through board.mjs like every other state change.
  *
- *   GET /                         the dashboard page
- *   GET /api/projects             every project with its jobs
- *   GET /api/jobs/<key>/<job-id>  the files of one job
+ *   GET  /                            the dashboard page
+ *   GET  /api/projects                every project with its jobs
+ *   GET  /api/jobs/<key>/<job-id>     the files of one job
+ *   POST /api/preview/<key>/<job-id>  start (or reuse) the job's review preview
  */
+import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { processAlive } from './preview.mjs';
 import { projectStatus, readRegistry } from './registry.mjs';
+
+const BOARD = join(dirname(fileURLToPath(import.meta.url)), 'board.mjs');
 
 const PAGE = join(dirname(fileURLToPath(import.meta.url)), '..', 'dashboard', 'index.html');
 const portArg = process.argv.indexOf('--port');
@@ -29,22 +35,67 @@ function send(res, status, type, body) {
 
 function readJobs(root) {
   try {
-    return Object.values(JSON.parse(readFileSync(join(root, 'factory', 'board.json'), 'utf8')).jobs ?? {});
+    const jobs = Object.values(JSON.parse(readFileSync(join(root, 'factory', 'board.json'), 'utf8')).jobs ?? {});
+    // A preview recorded on the board may have been stopped by hand, or by a restart.
+    for (const job of jobs) if (job.preview) job.preview.alive = processAlive(job.preview.pid);
+    return jobs;
   } catch {
     return [];
+  }
+}
+
+/** Whether the project's profile has a `preview` command, so the page can offer to start one. */
+function canPreview(root) {
+  try {
+    const front = /^---\n([\s\S]*?)\n---/.exec(readFileSync(join(root, 'factory', 'profile.md'), 'utf8'));
+    return Boolean(front && /^preview:[ \t]*\S/m.test(front[1]));
+  } catch {
+    return false;
   }
 }
 
 function projects() {
   return readRegistry().projects.map((entry) => {
     const status = projectStatus(entry);
-    return { ...entry, ...status, jobs: status.exists ? readJobs(entry.root) : [] };
+    return {
+      ...entry,
+      ...status,
+      canPreview: status.exists && canPreview(entry.root),
+      jobs: status.exists ? readJobs(entry.root) : [],
+    };
+  });
+}
+
+/**
+ * Only this page may start previews: a browser sends Origin on POST, and a
+ * site elsewhere (or a DNS-rebound name) would not match this localhost host.
+ */
+function sameOrigin(req) {
+  const host = req.headers.host ?? '';
+  return /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) && req.headers.origin === `http://${host}`;
+}
+
+function startPreview(res, key, id) {
+  const project = readRegistry().projects.find((p) => p.key === key);
+  if (!project || !existsSync(project.root)) return send(res, 404, 'application/json', '{"error":"no such project"}');
+  execFile('node', [BOARD, 'preview', id], { cwd: project.root, encoding: 'utf8' }, (error, stdout, stderr) => {
+    if (error) {
+      const message = stderr.replace(/^board: /, '').trim() || error.message;
+      return send(res, 500, 'application/json', JSON.stringify({ error: message }));
+    }
+    send(res, 200, 'application/json', stdout);
   });
 }
 
 export function createDashboardServer() {
   return createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
+    const previewRoute = /^\/api\/preview\/([\w-]+)\/([\w-]+)$/.exec(url.pathname);
+    if (previewRoute) {
+      if (req.method !== 'POST') return send(res, 405, 'text/plain', 'Use POST');
+      if (!sameOrigin(req)) return send(res, 403, 'application/json', '{"error":"cross-origin request refused"}');
+      return startPreview(res, previewRoute[1], previewRoute[2]);
+    }
     if (url.pathname === '/') {
       return send(res, 200, 'text/html; charset=utf-8', readFileSync(PAGE));
     }

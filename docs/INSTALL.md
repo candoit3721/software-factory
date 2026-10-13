@@ -50,6 +50,7 @@ It reads your repository and tailors `factory/profile.md`:
 - `base_branch`;
 - the `setup` command (installing dependencies in a fresh worktree);
 - the `verify` command (the full check);
+- the `preview` command (serves the app for you to try a job that waits for review);
 - lanes, escalation rules, and reviewer lenses.
 
 Review the escalation rules before the first job: they decide what merges without you.
@@ -60,6 +61,8 @@ The factory follows your project's conventions, so the project should have:
 
 `/factory:init` tells you if either is missing, and offers to help.
 If the check starts a web server, make its port come from the `FACTORY_PORT` environment variable, because jobs run in parallel.
+The `preview` command must listen on `$FACTORY_PORT` too, for example `preview: npm run dev -- --port $FACTORY_PORT`.
+A slow first start can take up to `preview_timeout` seconds (default 180).
 
 ## Updating
 
@@ -111,3 +114,5 @@ Job history (`factory/board.json`, `factory/jobs/`) stays on the machine that ra
 | Dashboard shows "Disconnected" | Restart it (see "Updating"). |
 | A project is missing from the dashboard | Run `/factory:dashboard` in that project. |
 | The check fails on port conflicts | Make the web server port read `FACTORY_PORT`. |
+| A preview does not start | Read `factory/jobs/<id>/preview.log`. The command must listen on `$FACTORY_PORT`. |
+| A preview keeps running after you are done | `/factory:preview <id> stop`. Merging, discarding or reworking the job also stops it. |

@@ -24,6 +24,7 @@ You implement one job inside its own git worktree and leave it committed and gre
 
 1. **Commits** on the job branch (already checked out in the worktree).
    Use small, conventional commits.
+   Commit-message rules in the user's or project's instructions (`CLAUDE.md`, `AGENTS.md`) override your defaults; for example, if they say not to add co-author trailers, add none.
    Leave **no** uncommitted changes, or the factory will reject the job.
 2. **`build.md`** at the path in your task.
    Append a section per round, never overwriting earlier ones:

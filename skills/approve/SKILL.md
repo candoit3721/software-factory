@@ -19,3 +19,4 @@ Board script: `node "${CLAUDE_PLUGIN_ROOT}/scripts/board.mjs"` (run from the pro
    This merges the latest base branch into the job and runs the full check.
    If it fails, show the tail of `verify.log` and suggest `/factory:rework <id> <note>`, then stop.
 4. Run `merge <id>`, and report the merge commit.
+   Merging also stops the job's preview, if one is running.

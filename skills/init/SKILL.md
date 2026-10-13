@@ -16,6 +16,7 @@ This skill makes those files fit **this** repository.
 3. **Tailor `factory/profile.md`.**
    Read `AGENTS.md`, `CLAUDE.md`, the README and the package manifest, then:
    - fill in `base_branch`, `setup` (installing dependencies in a fresh worktree) and `verify` (the full merge gate);
+   - fill in `preview`, the command that serves the app for a human to try, listening on `$FACTORY_PORT`; prefer one that serves what users will get (for example a production build), and delete the line if the project has nothing to run;
    - write the lanes, escalation rules and conventions for this project, replacing every `<placeholder>`;
    - choose reviewer lenses, adding domain lenses where they matter (for example "pedagogy" for learning content or "security" for logins and payments), with a lens file in `factory/reviewers/` for each;
    - remove the `<!-- factory:untailored ... -->` line.

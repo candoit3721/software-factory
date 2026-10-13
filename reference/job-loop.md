@@ -74,11 +74,15 @@ If the Agent tool rejects a name, use the listed agent type whose name ends in t
      If verify fails because the base moved, go back to step 3 with `verify.log`.
    - `ESCALATE`: run `BOARD stage <id> needs-human --note "<reason>"`.
    - A `STUCK` builder or exhausted verify attempts also end here: write no decision, just run `BOARD stage <id> needs-human --note "<reason>"`.
-7. **Report** in at most 8 lines:
+7. **Preview.**
+   When the job ended in `needs-human` after a build (not for a `BLOCKED:` spec), and the profile has a `preview` command, run `BOARD preview <id> --open`.
+   It starts the job's app from its worktree on a free port, opens it in the browser, and prints the `url`.
+   If it fails, keep going and mention the `preview.log` path in the report.
+8. **Report** in at most 8 lines:
    - the job id and final stage;
    - what was built, or why it stopped;
    - review verdicts per round;
-   - for needs-human: what to look at (paths and pages), plus the commands `/factory:approve <id>` and `/factory:rework <id> <note>`.
+   - for needs-human: the preview url, what to try there (pages and paths), plus the commands `/factory:approve <id>` and `/factory:rework <id> <note>`.
 
 Keep the user informed with one short line per stage change.
 Several sessions may run jobs at once; the board script handles locking.

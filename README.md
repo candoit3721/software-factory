@@ -11,7 +11,7 @@ You describe a change, and a team of agents takes it to your main branch:
   -> reviewers          one per lens, in parallel, each writes VERDICT: PASS or CHANGES
        (CHANGES -> builder again, up to max_rounds)
   -> approver           applies your project's escalation rules
-  -> APPROVE: verify again, merge to main      ESCALATE: waits for you (/factory:approve)
+  -> APPROVE: verify again, merge to main      ESCALATE: waits for you, with the app running from the job's worktree
 ```
 
 Inspired by the ZazenCodes video "Build Your Own AI Software Factory with Claude Code".
@@ -50,13 +50,18 @@ See [docs/INSTALL.md](docs/INSTALL.md) for options, updating, removing, and trou
 /factory:next                          # first open item in factory/backlog.md
 /factory:status
 /factory:dashboard                     # http://localhost:4700, all your factory projects
-/factory:approve 004                   # a unique id prefix is enough
+/factory:preview 004                   # run job 004's app so you can try it (a unique id prefix is enough)
+/factory:approve 004
 /factory:rework 004 "Use a Lake Ontario example"
 /factory:discard 004 "no longer needed"
 /factory:init                          # tailor the factory to this project
 ```
 
 `approve` and `discard` run only when you type them.
+
+When a job waits for you, the factory starts the app from the job's worktree and opens it in your browser, so you review the real thing, not just the diff.
+It runs the profile's `preview` command on a free port, and stops it when the job is merged, discarded or reworked.
+The dashboard links to running previews, and can start one.
 Run several Claude Code sessions to build several jobs at once; each job has its own worktree and port.
 
 ## What a project provides
@@ -68,7 +73,7 @@ It follows the project's own conventions, so the project needs:
 |---|---|
 | `AGENTS.md` (or `CLAUDE.md`) | How the project works. Every agent reads it first. |
 | One command that checks everything | `verify` in the profile, for example `npm run verify`. Nothing merges unless it passes. |
-| `factory/profile.md` | Front matter: `base_branch`, `setup`, `verify`, `reviewers`, `max_rounds`, `model_<lens>`. Body: lanes, escalation rules, conventions. |
+| `factory/profile.md` | Front matter: `base_branch`, `setup`, `verify`, `preview`, `reviewers`, `max_rounds`, `model_<lens>`. Body: lanes, escalation rules, conventions. |
 | `factory/reviewers/<lens>.md` | What each reviewer checks and what counts as blocking. |
 | `factory/backlog.md` | `- [ ] item` lines for `/factory:next`; merged items are checked off. |
 | `.claude/skills/*` (optional) | Recipes the builder follows, for example `add-lesson` or `add-endpoint`. |
@@ -79,11 +84,12 @@ For a brand-new project, build that foundation first (by hand or with Claude), t
 
 | Part | Where | Role |
 |---|---|---|
-| Commands | `skills/<name>/SKILL.md` | `new`, `next`, `status`, `approve`, `rework`, `discard`, `dashboard`, `init`. |
+| Commands | `skills/<name>/SKILL.md` | `new`, `next`, `status`, `preview`, `approve`, `rework`, `discard`, `dashboard`, `init`. |
 | Orchestrator loop | `reference/job-loop.md` | The steps `new`, `next` and `rework` follow. The Claude session runs it and spawns agents; it never writes code itself. |
 | Agents | `agents/*.md` | `spec-writer`, `builder`, `reviewer` (one generic agent used per lens), `approver`. |
 | Board | `scripts/board.mjs` | Deterministic state and git: jobs, stages, verdicts, worktrees, verify, merge, backlog. Locked for parallel sessions. |
 | Dashboard | `scripts/dashboard.mjs`, `scripts/registry.mjs`, `dashboard/index.html` | One live board for every factory project, with a project filter. |
+| Previews | `scripts/preview.mjs` | Runs a job's app from its worktree for review, detached, and stops it again. |
 | Installer | `scripts/setup.mjs` | The `npx` command above. |
 | Templates | `templates/` | Starter profile, backlog and review lenses. |
 

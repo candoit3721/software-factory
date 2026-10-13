@@ -3,6 +3,7 @@ base_branch: main
 max_rounds: 2
 setup: npm ci --prefer-offline --no-audit --no-fund
 verify: npm test
+preview: npm run dev -- --port $FACTORY_PORT
 reviewers: [code, experience]
 model_code: sonnet
 model_experience: sonnet
