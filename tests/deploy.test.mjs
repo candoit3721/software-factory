@@ -61,11 +61,11 @@ function profile(extra = '') {
       'setup: true',
       'verify: true',
       'reviewers: [code]',
-      'deploy: git push -q origin main',
+      `deploy: git push -q origin main && cp factory/board.json ${join(sandbox, 'during-deploy.json')}`,
       'deploy_wait: github-actions',
       `smoke: ${siteUrl}`,
       'smoke_timeout: 1',
-      `migrate: echo "$DEPLOY_COMMIT" >> ${migrateLog}`,
+      `migrate: echo "$DEPLOY_COMMIT" >> ${migrateLog} && cp factory/board.json ${join(sandbox, 'during-migrate.json')}`,
       'migrations: [db/]',
       'human_only: [db/]',
       extra,
@@ -151,6 +151,19 @@ describe('deploy', () => {
     assert.match(log, /Smoke check .*: HTTP 200/);
     assert.equal(boardFile().deploys.lastOk.commit, head());
     assert.equal(boardFile().jobs[job.id].deploy.state, 'ok');
+    assert.equal(boardFile().jobs[job.id].deploy.migrated, true);
+  });
+
+  it('records the step a running deploy is on, for the dashboard', () => {
+    const during = (name) => JSON.parse(readFileSync(join(sandbox, `during-${name}.json`), 'utf8'));
+    const job = Object.keys(during('migrate').jobs)[0];
+    assert.deepEqual(
+      ['migrate', 'deploy'].map((name) => [during(name).jobs[job].deploy.state, during(name).jobs[job].deploy.step]),
+      [
+        ['running', 'migrate'],
+        ['running', 'deploy'],
+      ],
+    );
   });
 
   it('skips migrate when no migration changed, and ships every job merged since', async () => {
@@ -161,6 +174,7 @@ describe('deploy', () => {
     const result = await ok(['deploy', second.id]);
     assert.deepEqual(result.jobs.sort(), [first.id, second.id].sort());
     assert.equal(migrations().length, 1, 'no new migration run');
+    assert.equal(boardFile().jobs[second.id].deploy.migrated, false);
     assert.match(readFileSync(join(repo, 'factory', 'jobs', second.id, 'deploy.log'), 'utf8'), /skipped migrate/);
     assert.equal(remoteHead(), head());
   });

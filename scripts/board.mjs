@@ -625,16 +625,23 @@ const commands = {
         log(result.output.trim());
         return result.ok;
       };
-      recordDeploy(job, lastOk, { state: 'running', commit: head, at: now() });
+      // The running state names its current step, so the dashboard can show it.
+      const started = now();
+      const running = (name) => recordDeploy(job, lastOk, { state: 'running', step: name, commit: head, at: started });
 
       let failure = null;
+      let migrated = false;
       if (profile.migrate) {
         if (migrationsChanged(lastOk?.commit, head, profile.migrations)) {
+          running('migrate');
+          migrated = true;
           if (!step(profile.migrate)) failure = { step: 'migrate', reason: 'the migrate command failed; nothing was deployed' };
         } else log('\nNo migration changes since the last deploy; skipped migrate.');
       }
+      if (!failure) running('deploy');
       if (!failure && !step(profile.deploy)) failure = { step: 'deploy', reason: 'the deploy command failed' };
       if (!failure && profile.deploy_wait) {
+        running('deploy_wait');
         if (profile.deploy_wait === 'github-actions') {
           log('\nWaiting for GitHub Actions...');
           const waited = await waitForGithubRuns(head, ROOT, profile.deploy_timeout * 1000, log);
@@ -642,6 +649,7 @@ const commands = {
         } else if (!step(profile.deploy_wait)) failure = { step: 'deploy_wait', reason: 'the deploy_wait command failed' };
       }
       if (!failure && profile.smoke) {
+        running('smoke');
         const checked = await smokeCheck(profile.smoke, profile.smoke_timeout * 1000);
         log(`\nSmoke check ${profile.smoke}: ${checked.ok ? `HTTP ${checked.status}` : checked.reason}`);
         if (!checked.ok) failure = { step: 'smoke', reason: checked.reason };
@@ -651,6 +659,7 @@ const commands = {
         state: failure ? 'failed' : 'ok',
         commit: head,
         at: now(),
+        migrated,
         ...(failure ?? {}),
         ...(profile.smoke ? { url: profile.smoke } : {}),
         log: logPath,

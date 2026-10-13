@@ -316,6 +316,26 @@
         nav.hidden = projects.length === 0;
       }
 
+      // Deploy steps, as board.mjs records them: what is happening now, and what failed.
+      const DEPLOY_STEPS = {
+        migrate: ['migrating database', 'database'],
+        deploy: ['publishing', 'publish'],
+        deploy_wait: ['waiting for CI', 'CI'],
+        smoke: ['checking live site', 'live check'],
+      };
+      function deployLabel(deploy) {
+        const [doing, part] = DEPLOY_STEPS[deploy.step] ?? ['deploying', deploy.step];
+        if (deploy.state === 'running') return doing;
+        if (deploy.state === 'failed') return part ? `deploy failed: ${part}` : 'deploy failed';
+        return deploy.migrated ? 'deployed + database' : 'deployed';
+      }
+      function deployTitle(deploy) {
+        const what = `Deploy of ${deploy.commit.slice(0, 7)}`;
+        if (deploy.state === 'running') return `${what}, started ${ago(deploy.at)}`;
+        if (deploy.state === 'failed') return `${what} failed ${ago(deploy.at)}: ${deploy.reason ?? ''}`;
+        return `${what}, ${ago(deploy.at)}${deploy.migrated ? ', with database migrations' : ''}`;
+      }
+
       function card(project, job) {
         const verdicts = job.verdicts?.[job.round] ?? {};
         const chips = (job.reviewers ?? [])
@@ -329,12 +349,8 @@
         const deploy = job.deploy;
         const note =
           (job.stage === 'needs-human' && (job.decision?.reason || last?.note)) ||
-          (deploy?.state === 'failed' && `Deploy failed at ${deploy.step}: ${deploy.reason}`);
-        const deployChip = deploy
-          ? `<span class="chip d-${esc(deploy.state)}" title="Deploy of ${esc(deploy.commit.slice(0, 7))}, ${ago(deploy.at)}">${
-              { ok: 'deployed', failed: 'deploy failed', running: 'deploying' }[deploy.state] ?? esc(deploy.state)
-            }</span>`
-          : '';
+          (deploy?.state === 'failed' && deploy.reason);
+        const deployChip = deploy ? `<span class="chip d-${esc(deploy.state)}" title="${esc(deployTitle(deploy))}">${esc(deployLabel(deploy))}</span>` : '';
         return `<button class="card" data-key="${esc(project.key)}" data-id="${esc(job.id)}" data-stage="${esc(job.stage)}" data-deploy="${esc(deploy?.state ?? '')}">
           ${filter === 'all' ? `<div class="card-project"><span class="hue-dot" style="--hue:${hue(project.key)}"></span>${esc(project.name)}</div>` : ''}
           <div class="card-id">${esc(job.id.slice(0, 3))} · ${job.round ? `round ${job.round}` : 'new'} · ${ago(job.updatedAt)}</div>
