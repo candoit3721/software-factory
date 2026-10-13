@@ -146,6 +146,19 @@ describe('review previews', () => {
     assert.equal(shown(merging.id).stage, 'merged');
   });
 
+  it('runs one preview at a time when the profile says preview_exclusive', async () => {
+    profile('node app.mjs\npreview_exclusive: true');
+    const a = waitingJob('Exclusive A');
+    const b = waitingJob('Exclusive B');
+    const first = board(['preview', a.id]);
+    const second = board(['preview', b.id]);
+    assert.deepEqual(second.stopped, [a.id]);
+    assert.ok(await gone(first.pid));
+    assert.equal(shown(a.id).preview, undefined);
+    assert.equal(await (await fetch(second.url)).text(), 'built by Exclusive B');
+    board(['preview', b.id, '--stop']);
+  });
+
   it('reports the log when the preview command fails', () => {
     profile('echo "no such server" && exit 3');
     const failing = waitingJob('Broken preview');

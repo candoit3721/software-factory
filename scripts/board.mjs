@@ -120,6 +120,7 @@ export function readProfile(path = PROFILE) {
   }
   profile.max_rounds = Number(profile.max_rounds ?? 2);
   profile.preview_timeout = Number(profile.preview_timeout ?? 180);
+  profile.preview_exclusive = profile.preview_exclusive === 'true';
   profile.deploy_timeout = Number(profile.deploy_timeout ?? 1200);
   profile.smoke_timeout = Number(profile.smoke_timeout ?? 300);
   profile.deploy_when = profile.deploy_when || 'auto';
@@ -200,6 +201,17 @@ function recordDeploy(job, lastOk, state) {
     for (const j of shipped) j.deploy = state;
     writeBoard(board);
     return shipped.map((j) => j.id);
+  });
+}
+
+/** Stop every other job's preview; returns their ids. */
+function stopOtherPreviews(id) {
+  return withLock(() => {
+    const board = readBoard();
+    const stopped = Object.values(board.jobs).filter((j) => j.id !== id && j.preview);
+    for (const j of stopped) endPreview(j);
+    if (stopped.length) writeBoard(board);
+    return stopped.map((j) => j.id);
   });
 }
 
@@ -569,6 +581,8 @@ const commands = {
       return out({ id: job.id, ...running, reused: true });
     }
     stopPreview(running); // stale: an older commit, or no longer answering
+    // Previews that share one resource (such as a local database) run one at a time.
+    const others = profile.preview_exclusive ? stopOtherPreviews(job.id) : [];
 
     const port = await freePort();
     const url = `http://localhost:${port}/`;
@@ -583,7 +597,7 @@ const commands = {
     const preview = { pid, port, url, commit: head, at: now() };
     save(preview);
     if (args.open) openInBrowser(url);
-    out({ id: job.id, ...preview, log });
+    out({ id: job.id, ...preview, log, ...(others.length ? { stopped: others } : {}) });
   },
 
   async deploy(args) {

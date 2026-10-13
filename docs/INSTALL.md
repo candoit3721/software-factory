@@ -63,6 +63,8 @@ The factory follows your project's conventions, so the project should have:
 If the check starts a web server, make its port come from the `FACTORY_PORT` environment variable, because jobs run in parallel.
 The `preview` command must listen on `$FACTORY_PORT` too, for example `preview: npm run dev -- --port $FACTORY_PORT`.
 A slow first start can take up to `preview_timeout` seconds (default 180).
+If previews share something that only one job can use at a time, such as a local database, add `preview_exclusive: true`: starting a preview then stops the others.
+A preview command can do more than serve the app, for example start a local Supabase in Docker, apply the job's migrations and load a copy of production data, then serve the app pointed at it.
 
 ## Deploying after each merge
 
