@@ -17,10 +17,11 @@ let server;
 let base;
 let alpha;
 
-function project(name, jobs) {
+function project(name, jobs, backlog) {
   const root = join(sandbox, name);
   mkdirSync(join(root, 'factory', 'jobs'), { recursive: true });
   writeFileSync(join(root, 'factory', 'profile.md'), '---\nbase_branch: main\n---\n');
+  if (backlog) writeFileSync(join(root, 'factory', 'backlog.md'), backlog);
   writeFileSync(
     join(root, 'factory', 'board.json'),
     JSON.stringify({ version: 1, jobs: Object.fromEntries(jobs.map((job) => [job.id, job])) }),
@@ -36,7 +37,11 @@ function project(name, jobs) {
 const job = (id, stage) => ({ id, title: `Job ${id}`, stage, round: 1, updatedAt: new Date().toISOString() });
 
 before(async () => {
-  alpha = project('alpha', [job('001-a', 'review'), job('002-b', 'needs-human')]);
+  alpha = project(
+    'alpha',
+    [{ ...job('001-a', 'review'), backlog: 'Claimed item' }, { ...job('002-b', 'needs-human') }, { ...job('003-c', 'failed'), backlog: 'Retry item' }],
+    '# Backlog\n\n- [x] Done item (000-done)\n- [ ] Claimed item\n- [ ] Retry item\n  - [ ]   Indented item  \n- [ ] Last item\n',
+  );
   project('beta', [job('001-c', 'merged')]);
   const gone = project('gone', []);
   rmSync(gone.root, { recursive: true, force: true });
@@ -62,7 +67,7 @@ describe('dashboard API', () => {
     assert.deepEqual(
       projects.map((p) => [p.name, p.exists, p.jobs.length]),
       [
-        ['alpha', true, 2],
+        ['alpha', true, 3],
         ['beta', true, 1],
         ['gone', false, 0],
       ],
@@ -78,6 +83,15 @@ describe('dashboard API', () => {
     const deployer = projects.find((p) => p.key === key);
     assert.deepEqual([deployer.canDeploy, deployer.canPreview], [true, false]);
     assert.equal(projects.find((p) => p.name === 'alpha').canDeploy, false);
+  });
+
+  it('lists the open backlog items no active job has claimed, in order', async () => {
+    const { projects } = await (await fetch(`${base}/api/projects`)).json();
+    const backlogOf = (name) => projects.find((p) => p.name === name).backlog;
+    // A failed job no longer holds its item, so the item is open again.
+    assert.deepEqual(backlogOf('alpha'), ['Retry item', 'Indented item', 'Last item']);
+    assert.deepEqual(backlogOf('beta'), []);
+    assert.deepEqual(backlogOf('gone'), []);
   });
 
   it('serves a job file list, but only Markdown and logs', async () => {

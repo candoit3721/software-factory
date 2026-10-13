@@ -5,12 +5,12 @@
  *   node dashboard.mjs [--port 4700]
  *
  * Projects come from the registry (see registry.mjs). The server binds to
- * localhost and reads each project's factory/board.json and
- * factory/jobs/<id>/*.md|log. Its one action, starting a review preview,
+ * localhost and reads each project's factory/board.json, factory/backlog.md
+ * and factory/jobs/<id>/*.md|log. Its one action, starting a review preview,
  * goes through board.mjs like every other state change.
  *
  *   GET  /                            the dashboard page
- *   GET  /api/projects                every project with its jobs
+ *   GET  /api/projects                every project with its jobs and open backlog items
  *   GET  /api/jobs/<key>/<job-id>     the files of one job
  *   POST /api/preview/<key>/<job-id>  start (or reuse) the job's review preview
  */
@@ -19,6 +19,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { backlogPath, unclaimedItems } from './backlog.mjs';
 import { processAlive } from './preview.mjs';
 import { projectStatus, readRegistry } from './registry.mjs';
 
@@ -57,12 +58,15 @@ function profileHas(root, key) {
 function projects() {
   return readRegistry().projects.map((entry) => {
     const status = projectStatus(entry);
+    const jobs = status.exists ? readJobs(entry.root) : [];
     return {
       ...entry,
       ...status,
       canPreview: status.exists && profileHas(entry.root, 'preview'),
       canDeploy: status.exists && profileHas(entry.root, 'deploy'),
-      jobs: status.exists ? readJobs(entry.root) : [],
+      jobs,
+      // An item a job has claimed shows as that job's card instead.
+      backlog: status.exists ? unclaimedItems(backlogPath(entry.root), jobs).map((item) => item.text) : [],
     };
   });
 }

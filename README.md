@@ -94,8 +94,8 @@ For a brand-new project, build that foundation first (by hand or with Claude), t
 | Commands | `skills/<name>/SKILL.md` | `new`, `next`, `status`, `preview`, `approve`, `deploy`, `rework`, `discard`, `dashboard`, `init`. |
 | Orchestrator loop | `reference/job-loop.md` | The steps `new`, `next` and `rework` follow. The Claude session runs it and spawns agents; it never writes code itself. |
 | Agents | `agents/*.md` | `spec-writer`, `builder`, `reviewer` (one generic agent used per lens), `approver`. |
-| Board | `scripts/board.mjs` | Deterministic state and git: jobs, stages, verdicts, worktrees, verify, merge, backlog. Locked for parallel sessions. |
-| Dashboard | `scripts/dashboard.mjs`, `scripts/registry.mjs`, `dashboard/index.html` | One live board for every factory project, with a project filter. Projects with deploys get a Deploy column. |
+| Board | `scripts/board.mjs`, `scripts/backlog.mjs` | Deterministic state and git: jobs, stages, verdicts, worktrees, verify, merge, backlog. Locked for parallel sessions. |
+| Dashboard | `scripts/dashboard.mjs`, `scripts/registry.mjs`, `dashboard/index.html` | One live board for every factory project, with a project filter. Open backlog items are listed above the board, the next one flagged. Projects with deploys get a Deploy column. |
 | Previews | `scripts/preview.mjs` | Runs a job's app from its worktree for review, detached, and stops it again. |
 | Deploys | `scripts/deploy.mjs` | Waits for GitHub Actions and smoke-checks the live site; `board.mjs deploy` runs the steps. |
 | Installer | `scripts/setup.mjs` | The `npx` command above. |

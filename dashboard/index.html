@@ -103,7 +103,7 @@
 
       .board {
         display: grid;
-        grid-template-columns: repeat(var(--columns, 6), minmax(170px, 1fr));
+        grid-template-columns: repeat(var(--columns, 6), minmax(140px, 1fr));
         gap: 14px;
         padding: 20px 24px 32px;
         overflow-x: auto;
@@ -145,6 +145,26 @@
       }
       .card:hover { background: var(--card-hover); border-color: var(--faint); }
       .card[data-stage='needs-human'] { border-color: var(--human); }
+      .card.backlog-item { cursor: default; }
+      .card.backlog-item:hover { background: var(--card); border-color: var(--line); }
+      .backlog-item .card-meta { margin-bottom: 6px; }
+      .backlog-item .item-text {
+        font-size: 13.5px;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 4;
+        overflow: hidden;
+      }
+      .backlog-item.is-expanded .item-text { display: block; }
+      .expand {
+        display: block; margin-top: 6px; padding: 0;
+        font: inherit; font-size: 12px; color: var(--active);
+        background: none; border: 0; cursor: pointer;
+      }
+      .expand:hover { text-decoration: underline; }
+      .expand:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; border-radius: 4px; }
       .card-project {
         display: flex;
         align-items: center;
@@ -265,6 +285,7 @@
     </dialog>
     <script>
       const COLUMNS = [
+        ['backlog', 'Backlog'],
         ['spec', 'Spec'],
         ['build', 'Build'],
         ['review', 'Review'],
@@ -282,8 +303,11 @@
       let open = null; // { key, id }
       let openFile = null;
       let showAllDone = false;
+      let showAllBacklog = false;
+      const expanded = new Set(); // `${key}\n${text}` of backlog items shown in full
       const previewState = new Map(); // `${key}/${id}` -> { starting, error }
       const DONE_LIMIT = 6;
+      const BACKLOG_LIMIT = 8;
 
       const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
       const hue = (key) => [...key].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
@@ -360,7 +384,59 @@
         </button>`;
       }
 
+      // An open backlog item: not a job yet, so it has no drawer. `next` is what /factory:next takes.
+      function backlogCard({ project, text, next }) {
+        const id = `${project.key}\n${text}`;
+        return `<div class="card backlog-item${expanded.has(id) ? ' is-expanded' : ''}" data-item="${esc(id)}">
+          ${filter === 'all' ? `<div class="card-project"><span class="hue-dot" style="--hue:${hue(project.key)}"></span>${esc(project.name)}</div>` : ''}
+          ${next ? '<div class="card-meta"><span class="chip working" title="/factory:next starts this item">next up</span></div>' : ''}
+          <div class="item-text">${esc(text)}</div>
+        </div>`;
+      }
+
+      function backlogColumn(backlog, label) {
+        const hidden = showAllBacklog ? 0 : Math.max(0, backlog.length - BACKLOG_LIMIT);
+        const more = hidden
+          ? `<button class="more" data-action="show-backlog">Show ${hidden} more</button>`
+          : showAllBacklog && backlog.length > BACKLOG_LIMIT
+            ? '<button class="more" data-action="show-backlog">Show fewer</button>'
+            : '';
+        return `<section class="column" data-stage="backlog" aria-label="${label}">
+          <h2 title="/factory:next takes the item marked next up">${label} <b>${backlog.length}</b></h2>
+          <div class="cards">${backlog.slice(0, backlog.length - hidden).map(backlogCard).join('')}${more}</div>
+        </section>`;
+      }
+
+      // Only items cut off by the line clamp get a toggle; it is measured, since that depends on the column width.
+      function addExpandToggles() {
+        for (const item of main.querySelectorAll('.backlog-item')) {
+          const open = item.classList.contains('is-expanded');
+          const text = item.querySelector('.item-text');
+          if (!open && text.scrollHeight <= text.clientHeight + 1) continue;
+          item.insertAdjacentHTML(
+            'beforeend',
+            `<button type="button" class="expand" data-action="expand" aria-expanded="${open}">${open ? 'Show less' : 'Show all'}</button>`,
+          );
+        }
+      }
+
+      // The board re-renders every refresh; this finds the same control again so keyboard focus survives it.
+      function focusSelector() {
+        const el = document.activeElement;
+        if (!el || !main.contains(el)) return null;
+        if (el.matches('button.card')) return `button.card[data-key="${CSS.escape(el.dataset.key)}"][data-id="${CSS.escape(el.dataset.id)}"]`;
+        if (el.matches('.expand')) return `.backlog-item[data-item="${CSS.escape(el.closest('.backlog-item').dataset.item)}"] .expand`;
+        if (el.dataset.action) return `[data-action="${CSS.escape(el.dataset.action)}"]`;
+        return null;
+      }
+
       function renderBoard() {
+        const refocus = focusSelector();
+        drawBoard();
+        if (refocus) main.querySelector(refocus)?.focus();
+      }
+
+      function drawBoard() {
         if (projects.length === 0) {
           main.innerHTML = `<div class="welcome"><h2>No factory projects yet</h2>
             <p>Open Claude Code in a project and run <code>/factory:init</code>.
@@ -378,11 +454,16 @@
             : job.stage === 'discarded'
               ? 'merged'
               : job.stage;
-        // Show the Deploy column only where deploys are set up (or one is in it).
-        const columns = COLUMNS.filter(
-          ([stage]) => stage !== 'deploy' || shown.some((p) => p.canDeploy) || entries.some(({ job }) => columnOf(job) === 'deploy'),
+        const backlog = shown.flatMap((p) => (p.backlog ?? []).map((text, i) => ({ project: p, text, next: i === 0 })));
+        // Show the Backlog column only when something is queued, and Deploy only where deploys
+        // are set up (or one is in it).
+        const columns = COLUMNS.filter(([stage]) =>
+          stage === 'backlog'
+            ? backlog.length > 0
+            : stage !== 'deploy' || shown.some((p) => p.canDeploy) || entries.some(({ job }) => columnOf(job) === 'deploy'),
         );
         main.innerHTML = `<div class="board" style="--columns:${columns.length}">${columns.map(([stage, label]) => {
+          if (stage === 'backlog') return backlogColumn(backlog, label);
           const inColumn = entries.filter(({ job }) => columnOf(job) === stage);
           const failed = inColumn.some(({ job }) => job.deploy?.state === 'failed');
           // Finished work piles up; show the latest few unless asked.
@@ -399,6 +480,7 @@
             <div class="cards">${cards || '<div class="empty">Nothing here</div>'}${more}</div>
           </section>`;
         }).join('')}</div>`;
+        addExpandToggles();
       }
 
       function render() {
@@ -499,7 +581,19 @@
           renderBoard();
           return;
         }
-        const button = event.target.closest('.card');
+        if (event.target.closest('[data-action="show-backlog"]')) {
+          showAllBacklog = !showAllBacklog;
+          renderBoard();
+          return;
+        }
+        const toggle = event.target.closest('[data-action="expand"]');
+        if (toggle) {
+          const id = toggle.closest('.backlog-item').dataset.item;
+          if (!expanded.delete(id)) expanded.add(id);
+          renderBoard();
+          return;
+        }
+        const button = event.target.closest('button.card');
         if (!button) return;
         open = { key: button.dataset.key, id: button.dataset.id };
         loadFiles(true);

@@ -1,6 +1,6 @@
 ---
 name: dashboard
-description: Open the software factory dashboard, which shows the jobs of every factory project. Use when the user types /factory:dashboard or asks to see the factory board.
+description: Open the software factory dashboard, which shows the jobs and open backlog items of every factory project. Use when the user types /factory:dashboard or asks to see the factory board.
 ---
 
 # Factory dashboard

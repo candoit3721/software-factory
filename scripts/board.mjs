@@ -33,6 +33,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { basename, dirname, join, resolve } from 'node:path';
+import { backlogPath, checkOffBacklog, unclaimedItems } from './backlog.mjs';
 import { smokeCheck, waitForGithubRuns } from './deploy.mjs';
 import { answers, launchPreview, openInBrowser, processAlive, stopPreview, tail, waitForPreview } from './preview.mjs';
 import { projectKey, readRegistry, registerProject, unregisterProject } from './registry.mjs';
@@ -42,12 +43,11 @@ const FACTORY = join(ROOT, 'factory');
 const JOBS = join(FACTORY, 'jobs');
 const BOARD = join(FACTORY, 'board.json');
 const PROFILE = join(FACTORY, 'profile.md');
-const BACKLOG = join(FACTORY, 'backlog.md');
+const BACKLOG = backlogPath(ROOT);
 const LOCK = join(FACTORY, '.board.lock');
 const DEPLOY_LOCK = join(FACTORY, '.deploy.lock');
 
 export const STAGES = ['spec', 'build', 'review', 'approve', 'needs-human', 'merged', 'discarded', 'failed'];
-const ACTIVE = new Set(['spec', 'build', 'review', 'approve', 'needs-human']);
 
 // ----------------------------------------------------------------- helpers
 
@@ -315,28 +315,6 @@ function withLock(fn) {
   }
 }
 
-// ---------------------------------------------------------------- backlog
-
-/** Backlog items are Markdown task lines: "- [ ] text" (open) or "- [x] text" (done). */
-function backlogItems() {
-  if (!existsSync(BACKLOG)) return [];
-  return readFileSync(BACKLOG, 'utf8')
-    .split('\n')
-    .map((line, index) => ({ line, index, match: /^\s*- \[( |x)\] (.+)$/.exec(line) }))
-    .filter((entry) => entry.match)
-    .map((entry) => ({ index: entry.index, done: entry.match[1] === 'x', text: entry.match[2].trim() }));
-}
-
-function checkOffBacklog(text, jobId) {
-  if (!existsSync(BACKLOG)) return false;
-  const lines = readFileSync(BACKLOG, 'utf8').split('\n');
-  const index = lines.findIndex((line) => line.trim() === `- [ ] ${text}`);
-  if (index === -1) return false;
-  lines[index] = lines[index].replace('- [ ]', '- [x]') + ` (${jobId})`;
-  writeFileSync(BACKLOG, lines.join('\n'));
-  return true;
-}
-
 // --------------------------------------------------------------- commands
 
 const commands = {
@@ -526,7 +504,7 @@ const commands = {
 
     endPreview(job);
     git(['merge', '--no-ff', job.branch, '-m', `Merge ${job.branch}: ${job.title}`]);
-    if (job.backlog && checkOffBacklog(job.backlog, job.id)) {
+    if (job.backlog && checkOffBacklog(BACKLOG, job.backlog, job.id)) {
       git(['add', BACKLOG]);
       const short = job.backlog.length > 60 ? `${job.backlog.slice(0, 57).trimEnd()}...` : job.backlog;
       git(['commit', '-m', `chore(factory): check off ${job.id}\n\n${short}`]);
@@ -673,14 +651,8 @@ const commands = {
   },
 
   next() {
-    const board = readBoard();
-    const claimed = new Set(
-      Object.values(board.jobs)
-        .filter((job) => ACTIVE.has(job.stage) && job.backlog)
-        .map((job) => job.backlog),
-    );
-    const item = backlogItems().find((entry) => !entry.done && !claimed.has(entry.text));
-    out(item ? { item: item.text } : { item: null });
+    const [item] = unclaimedItems(BACKLOG, Object.values(readBoard().jobs));
+    out({ item: item?.text ?? null });
   },
 
   list() {
