@@ -32,7 +32,7 @@ describe('plugin structure', () => {
   });
 
   it('has the expected commands', () => {
-    assert.deepEqual(skills.sort(), ['approve', 'dashboard', 'discard', 'init', 'new', 'next', 'preview', 'rework', 'status']);
+    assert.deepEqual(skills.sort(), ['approve', 'dashboard', 'deploy', 'discard', 'init', 'new', 'next', 'preview', 'rework', 'status']);
   });
 
   it('names every skill after its folder and describes it', () => {
@@ -44,7 +44,7 @@ describe('plugin structure', () => {
   });
 
   it('lets only the user trigger commands that merge or delete work', () => {
-    for (const skill of ['approve', 'discard']) {
+    for (const skill of ['approve', 'deploy', 'discard']) {
       assert.equal(frontMatter(join(ROOT, 'skills', skill, 'SKILL.md'))['disable-model-invocation'], 'true');
     }
   });

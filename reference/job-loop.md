@@ -72,14 +72,27 @@ If the Agent tool rejects a name, use the listed agent type whose name ends in t
    Then run `BOARD decision <id>`.
    - `APPROVE`: run `BOARD verify <id>` (re-sync with the base), then `BOARD merge <id>`.
      If verify fails because the base moved, go back to step 3 with `verify.log`.
+     If merge exits with code 3 ("needs a human"), the job changes paths that only a person may approve: run `BOARD stage <id> needs-human --note "<the message>"`.
+     Never pass `--human` yourself.
+     After a successful merge, deploy (step 7).
    - `ESCALATE`: run `BOARD stage <id> needs-human --note "<reason>"`.
    - A `STUCK` builder or exhausted verify attempts also end here: write no decision, just run `BOARD stage <id> needs-human --note "<reason>"`.
-7. **Preview.**
+7. **Deploy.**
+   Only after a merge, and only when the profile has a `deploy` command and `deploy_when` is `auto` (the default).
+   Run `BOARD deploy <id>` with a long timeout (it can take up to `deploy_timeout` seconds, 20 minutes by default).
+   It runs, from the main tree:
+   - `migrate`, when migration files changed since the last good deploy;
+   - `deploy`, then `deploy_wait`;
+   - the `smoke` check of the live url.
+
+   If it fails, the merge stands: report the failed `step`, the end of `deploy.log`, and `/factory:deploy <id>` to retry once fixed.
+   With `deploy_when: ask`, do not deploy; mention `/factory:deploy <id>` in the report.
+8. **Preview.**
    When the job ended in `needs-human` after a build (not for a `BLOCKED:` spec), and the profile has a `preview` command, run `BOARD preview <id> --open`.
    It starts the job's app from its worktree on a free port, opens it in the browser, and prints the `url`.
    If it fails, keep going and mention the `preview.log` path in the report.
-8. **Report** in at most 8 lines:
-   - the job id and final stage;
+9. **Report** in at most 8 lines:
+   - the job id and final stage, and the deploy result with the live url;
    - what was built, or why it stopped;
    - review verdicts per round;
    - for needs-human: the preview url, what to try there (pages and paths), plus the commands `/factory:approve <id>` and `/factory:rework <id> <note>`.

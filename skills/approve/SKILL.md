@@ -18,5 +18,8 @@ Board script: `node "${CLAUDE_PLUGIN_ROOT}/scripts/board.mjs"` (run from the pro
 3. Run `verify <id>`.
    This merges the latest base branch into the job and runs the full check.
    If it fails, show the tail of `verify.log` and suggest `/factory:rework <id> <note>`, then stop.
-4. Run `merge <id>`, and report the merge commit.
+4. Run `merge <id> --human`, and report the merge commit.
+   `--human` records that a person approved it, which paths marked `human_only` in the profile (such as database migrations) require.
    Merging also stops the job's preview, if one is running.
+5. If the profile has a `deploy` command and `deploy_when` is not `ask`, run `deploy <id>` with a long timeout and report the result.
+   If it fails, show the failed step and the end of `deploy.log`; the merge stands, and `/factory:deploy <id>` retries.

@@ -26,7 +26,7 @@ let MARKETPLACE = JSON.parse(readFileSync(join(PACKAGE_ROOT, '.claude-plugin', '
 let PLUGIN = `factory@${MARKETPLACE}`;
 const LEGACY_PLUGINS = ['software-factory@software-factory-local', 'factory@software-factory-local'];
 const LEGACY_MARKETPLACES = ['software-factory-local'];
-const IGNORE = ['factory/jobs/', 'factory/board.json', 'factory/.board.lock'];
+const IGNORE = ['factory/jobs/', 'factory/board.json', 'factory/.board.lock', 'factory/.deploy.lock', 'factory/deploy.log'];
 
 // ------------------------------------------------------------------- args
 

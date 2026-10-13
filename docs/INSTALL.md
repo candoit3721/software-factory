@@ -38,7 +38,7 @@ It is safe to run again: it updates the plugin and never overwrites files you ed
    This records the GitHub source in `.claude/settings.json`, so anyone who clones the project gets the same factory.
    On later runs it updates instead.
 5. Copies `factory/profile.md`, `factory/backlog.md` and `factory/reviewers/` from the templates, skipping files that exist.
-6. Adds `factory/jobs/`, `factory/board.json` and `factory/.board.lock` to `.gitignore`.
+6. Adds the factory's runtime files (`factory/jobs/`, `factory/board.json`, its lock files and `factory/deploy.log`) to `.gitignore`.
 7. Registers the project in `~/.config/software-factory/projects.json`, for the dashboard.
 8. Commits only those files: `factory/`, `.gitignore` and `.claude/settings.json`.
    Your other uncommitted work is left alone.
@@ -63,6 +63,48 @@ The factory follows your project's conventions, so the project should have:
 If the check starts a web server, make its port come from the `FACTORY_PORT` environment variable, because jobs run in parallel.
 The `preview` command must listen on `$FACTORY_PORT` too, for example `preview: npm run dev -- --port $FACTORY_PORT`.
 A slow first start can take up to `preview_timeout` seconds (default 180).
+
+## Deploying after each merge
+
+Add deploy keys to the front matter of `factory/profile.md`.
+Every key is optional except `deploy`.
+
+| Key | Meaning |
+|---|---|
+| `deploy` | The command that deploys the base branch, run from the project root. `$DEPLOY_COMMIT` holds the commit. |
+| `deploy_wait` | A command that waits until the deploy is live, or `github-actions` to wait for every GitHub Actions run of the commit. |
+| `smoke` | A url that must answer 2xx afterwards (`smoke_timeout` seconds, default 300). |
+| `migrate` | The database migration command, run before `deploy`. |
+| `migrations` | Folders of migration files. `migrate` runs only when they changed since the last good deploy. |
+| `human_only` | Paths that never merge without `/factory:approve`. Put your migrations folder here. |
+| `deploy_when` | `auto` (default) deploys after every merge; `ask` waits for `/factory:deploy`. |
+| `deploy_timeout` | Seconds to wait for `deploy_wait` (default 1200). |
+
+Examples:
+
+```yaml
+# GitHub Pages, deployed by a GitHub Actions workflow on push
+deploy: git push origin main
+deploy_wait: github-actions
+smoke: https://<owner>.github.io/<repo>/
+
+# Render, auto-deploying from GitHub
+deploy: git push origin main
+smoke: https://<service>.onrender.com/healthz
+
+# Supabase database migrations
+migrate: npx --yes supabase db push
+migrations: [supabase/migrations/]
+human_only: [supabase/migrations/]
+```
+
+The factory never handles passwords or tokens.
+Log the CLIs in once on your machine (`gh auth login`, `npx supabase login` and `npx supabase link`, or a `RENDER_API_KEY` in your environment).
+
+A failed step stops the deploy, and the merge stands.
+A failed `migrate` deployed nothing.
+The job shows "deploy failed" on the dashboard; fix the cause, then run `/factory:deploy`.
+Database changes are not rolled back automatically: write migrations that the old version of the app can live with.
 
 ## Updating
 
@@ -115,4 +157,5 @@ Job history (`factory/board.json`, `factory/jobs/`) stays on the machine that ra
 | A project is missing from the dashboard | Run `/factory:dashboard` in that project. |
 | The check fails on port conflicts | Make the web server port read `FACTORY_PORT`. |
 | A preview does not start | Read `factory/jobs/<id>/preview.log`. The command must listen on `$FACTORY_PORT`. |
+| "deploy failed" on a job | Read `factory/jobs/<id>/deploy.log` (or `factory/deploy.log`), fix the cause, then `/factory:deploy`. |
 | A preview keeps running after you are done | `/factory:preview <id> stop`. Merging, discarding or reworking the job also stops it. |

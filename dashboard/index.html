@@ -201,7 +201,10 @@
       .drawer-head .button.primary { background: var(--active); border-color: var(--active); color: var(--bg); font-weight: 650; }
       .drawer-head button:disabled { cursor: progress; opacity: 0.7; }
       .preview-error { flex-basis: 100%; margin: 0; color: var(--human); font-size: 12.5px; text-align: right; overflow-wrap: anywhere; }
-      .v-preview { color: var(--active); }
+      .v-preview, .d-running { color: var(--active); }
+      .d-ok { color: var(--pass); }
+      .d-failed { color: var(--human); }
+      .card[data-deploy='failed'] { border-color: var(--human); }
       .drawer-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
       .tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 20px 0; }
       .tabs button {
@@ -320,12 +323,20 @@
           })
           .join('');
         const last = job.history?.[job.history.length - 1];
-        const note = job.stage === 'needs-human' && (job.decision?.reason || last?.note);
-        return `<button class="card" data-key="${esc(project.key)}" data-id="${esc(job.id)}" data-stage="${esc(job.stage)}">
+        const deploy = job.deploy;
+        const note =
+          (job.stage === 'needs-human' && (job.decision?.reason || last?.note)) ||
+          (deploy?.state === 'failed' && `Deploy failed at ${deploy.step}: ${deploy.reason}`);
+        const deployChip = deploy
+          ? `<span class="chip d-${esc(deploy.state)}" title="Deploy of ${esc(deploy.commit.slice(0, 7))}, ${ago(deploy.at)}">${
+              { ok: 'deployed', failed: 'deploy failed', running: 'deploying' }[deploy.state] ?? esc(deploy.state)
+            }</span>`
+          : '';
+        return `<button class="card" data-key="${esc(project.key)}" data-id="${esc(job.id)}" data-stage="${esc(job.stage)}" data-deploy="${esc(deploy?.state ?? '')}">
           ${filter === 'all' ? `<div class="card-project"><span class="hue-dot" style="--hue:${hue(project.key)}"></span>${esc(project.name)}</div>` : ''}
           <div class="card-id">${esc(job.id.slice(0, 3))} · ${job.round ? `round ${job.round}` : 'new'} · ${ago(job.updatedAt)}</div>
           <div class="card-title">${esc(job.title)}</div>
-          <div class="card-meta">${chips}${job.preview?.alive ? '<span class="chip v-preview" title="A preview of this job is running; open the job to try it">preview</span>' : ''}</div>
+          <div class="card-meta">${chips}${deployChip}${job.preview?.alive ? '<span class="chip v-preview" title="A preview of this job is running; open the job to try it">preview</span>' : ''}</div>
           ${note ? `<div class="note">${esc(note)}</div>` : ''}
         </button>`;
       }

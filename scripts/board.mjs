@@ -14,7 +14,9 @@
  *   node board.mjs decision <id>           read decision.md
  *   node board.mjs setup <id>              run the profile's setup command in the worktree
  *   node board.mjs verify <id>             merge the base branch into the job, then run the profile's verify command
- *   node board.mjs merge <id>              merge the verified job into the base branch and clean up
+ *   node board.mjs merge <id> [--human]    merge the verified job into the base branch and clean up
+ *                                          (--human: a person approved it; required for human_only paths)
+ *   node board.mjs deploy [<id>]           migrate, deploy and smoke-check the base branch (profile commands)
  *   node board.mjs discard <id>            drop the worktree and branch
  *   node board.mjs preview <id> [--open]   run the job's app from its worktree for a human to try
  *   node board.mjs preview <id> --stop     stop it (merge, discard and leaving needs-human also stop it)
@@ -24,12 +26,14 @@
  *   node board.mjs projects                every registered project
  *
  * Output is JSON on stdout (except `list`). Exit code 0 on success, 1 on a
- * failed check (verify, merge preconditions), 2 on usage errors.
+ * failed check (verify, merge preconditions, deploy), 2 on usage errors,
+ * 3 when a merge needs a human.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { basename, dirname, join, resolve } from 'node:path';
+import { smokeCheck, waitForGithubRuns } from './deploy.mjs';
 import { answers, launchPreview, openInBrowser, processAlive, stopPreview, tail, waitForPreview } from './preview.mjs';
 import { projectKey, readRegistry, registerProject, unregisterProject } from './registry.mjs';
 
@@ -40,6 +44,7 @@ const BOARD = join(FACTORY, 'board.json');
 const PROFILE = join(FACTORY, 'profile.md');
 const BACKLOG = join(FACTORY, 'backlog.md');
 const LOCK = join(FACTORY, '.board.lock');
+const DEPLOY_LOCK = join(FACTORY, '.deploy.lock');
 
 export const STAGES = ['spec', 'build', 'review', 'approve', 'needs-human', 'merged', 'discarded', 'failed'];
 const ACTIVE = new Set(['spec', 'build', 'review', 'approve', 'needs-human']);
@@ -115,6 +120,13 @@ export function readProfile(path = PROFILE) {
   }
   profile.max_rounds = Number(profile.max_rounds ?? 2);
   profile.preview_timeout = Number(profile.preview_timeout ?? 180);
+  profile.deploy_timeout = Number(profile.deploy_timeout ?? 1200);
+  profile.smoke_timeout = Number(profile.smoke_timeout ?? 300);
+  profile.deploy_when = profile.deploy_when || 'auto';
+  for (const key of ['human_only', 'migrations']) {
+    if (typeof profile[key] === 'string') profile[key] = profile[key] ? [profile[key]] : [];
+    profile[key] ??= [];
+  }
   return profile;
 }
 
@@ -162,6 +174,33 @@ function endPreview(job) {
   if (!job.preview) return;
   stopPreview(job.preview);
   delete job.preview;
+}
+
+/** Whether migration files changed between the last good deploy and `head` (unknown counts as changed). */
+function migrationsChanged(since, head, paths) {
+  if (!since || paths.length === 0) return true;
+  const diff = tryGit(['diff', '--name-only', since, head, '--', ...paths]);
+  return !diff.ok || diff.out !== '';
+}
+
+/**
+ * Record a deploy on the board and on the jobs it ships: the given job plus
+ * every job merged since the last good deploy. Returns their ids.
+ */
+function recordDeploy(job, lastOk, state) {
+  return withLock(() => {
+    const board = readBoard();
+    board.deploys = { ...board.deploys, last: state, ...(state.state === 'ok' ? { lastOk: state } : {}) };
+    const mergedAt = (j) => j.history.findLast((h) => h.stage === 'merged')?.at;
+    const shipped = Object.values(board.jobs).filter(
+      (j) =>
+        j.id === job?.id ||
+        (lastOk && j.stage === 'merged' && mergedAt(j) > lastOk.at && j.deploy?.state !== 'ok'),
+    );
+    for (const j of shipped) j.deploy = state;
+    writeBoard(board);
+    return shipped.map((j) => j.id);
+  });
 }
 
 function worktreesDir() {
@@ -222,36 +261,45 @@ function runShell(command, cwd, extraEnv = {}) {
  * factory sessions can run jobs in parallel. mkdir is atomic; a lock older
  * than two minutes is treated as abandoned.
  */
-let lockHeld = false;
-// fail() exits the process, which skips `finally`; release the lock here too.
+const held = new Set();
+// fail() exits the process, which skips `finally`; release locks here too.
 process.on('exit', () => {
-  if (lockHeld) rmSync(LOCK, { recursive: true, force: true });
+  for (const path of held) rmSync(path, { recursive: true, force: true });
 });
 
-function withLock(fn) {
+/** Wait for a lock directory; a lock older than `staleMs` counts as abandoned. */
+function acquire(path, staleMs, what) {
   mkdirSync(FACTORY, { recursive: true });
   const sleeper = new Int32Array(new SharedArrayBuffer(4));
-  for (let attempt = 0; ; attempt++) {
+  const deadline = Date.now() + staleMs * 1.5; // longer than it takes a lock to go stale
+  for (;;) {
     try {
-      mkdirSync(LOCK);
-      lockHeld = true;
-      break;
+      mkdirSync(path);
+      held.add(path);
+      return;
     } catch {
       try {
-        if (Date.now() - statSync(LOCK).mtimeMs > 60_000) rmSync(LOCK, { recursive: true, force: true });
+        if (Date.now() - statSync(path).mtimeMs > staleMs) rmSync(path, { recursive: true, force: true });
       } catch {
         // Lock vanished between checks: retry.
       }
-      // 90 s of waiting, longer than the 60 s after which a lock counts as abandoned.
-      if (attempt > 1800) fail('board is locked by another process (factory/.board.lock)');
+      if (Date.now() > deadline) fail(`${what} is locked by another process (${path})`);
       Atomics.wait(sleeper, 0, 0, 50);
     }
   }
+}
+
+function release(path) {
+  rmSync(path, { recursive: true, force: true });
+  held.delete(path);
+}
+
+function withLock(fn) {
+  acquire(LOCK, 60_000, 'the board');
   try {
     return fn();
   } finally {
-    rmSync(LOCK, { recursive: true, force: true });
-    lockHeld = false;
+    release(LOCK);
   }
 }
 
@@ -456,6 +504,13 @@ const commands = {
     if (!tryGit(['merge-base', '--is-ancestor', profile.base_branch, job.branch]).ok) {
       fail(`${profile.base_branch} moved since verification; run "verify" again`);
     }
+    // Paths such as database migrations only merge when a person approved the job.
+    const changed = git(['diff', '--name-only', `${profile.base_branch}...${job.branch}`]).split('\n').filter(Boolean);
+    const guarded = changed.filter((file) => profile.human_only.some((prefix) => file.startsWith(prefix)));
+    if (guarded.length && !args.human) {
+      process.stderr.write(`board: needs a human: it changes ${guarded.join(', ')} (human_only in the profile)\n`);
+      process.exit(3);
+    }
 
     endPreview(job);
     git(['merge', '--no-ff', job.branch, '-m', `Merge ${job.branch}: ${job.title}`]);
@@ -531,6 +586,69 @@ const commands = {
     out({ id: job.id, ...preview, log });
   },
 
+  async deploy(args) {
+    const profile = readProfile();
+    if (!profile.deploy) fail('factory/profile.md has no "deploy" command; add one, for example: deploy: git push origin main', 2);
+    const job = args._[0] ? getJob(readBoard(), args._[0]) : null;
+    if (git(['rev-parse', '--abbrev-ref', 'HEAD']) !== profile.base_branch) {
+      fail(`check out "${profile.base_branch}" in ${ROOT} first; deploys run from it`);
+    }
+    const dirty = git(['status', '--porcelain']);
+    if (dirty) fail(`the main working tree has uncommitted changes; deploy only committed work:\n${dirty}`);
+
+    // One deploy at a time; a second one waits, then deploys the newer commit.
+    acquire(DEPLOY_LOCK, (profile.deploy_timeout + 600) * 1000, 'deploying');
+    try {
+      const head = git(['rev-parse', 'HEAD']);
+      const lastOk = readBoard().deploys?.lastOk ?? null;
+      const logPath = job ? join(JOBS, job.id, 'deploy.log') : join(FACTORY, 'deploy.log');
+      mkdirSync(dirname(logPath), { recursive: true });
+      writeFileSync(logPath, `deploy ${head}\n`);
+      const log = (text) => appendFileSync(logPath, `${text}\n`);
+      const step = (command) => {
+        log(`\n$ ${command}`);
+        const result = runShell(command, ROOT, { DEPLOY_COMMIT: head });
+        log(result.output.trim());
+        return result.ok;
+      };
+      recordDeploy(job, lastOk, { state: 'running', commit: head, at: now() });
+
+      let failure = null;
+      if (profile.migrate) {
+        if (migrationsChanged(lastOk?.commit, head, profile.migrations)) {
+          if (!step(profile.migrate)) failure = { step: 'migrate', reason: 'the migrate command failed; nothing was deployed' };
+        } else log('\nNo migration changes since the last deploy; skipped migrate.');
+      }
+      if (!failure && !step(profile.deploy)) failure = { step: 'deploy', reason: 'the deploy command failed' };
+      if (!failure && profile.deploy_wait) {
+        if (profile.deploy_wait === 'github-actions') {
+          log('\nWaiting for GitHub Actions...');
+          const waited = await waitForGithubRuns(head, ROOT, profile.deploy_timeout * 1000, log);
+          if (!waited.ok) failure = { step: 'deploy_wait', reason: waited.reason };
+        } else if (!step(profile.deploy_wait)) failure = { step: 'deploy_wait', reason: 'the deploy_wait command failed' };
+      }
+      if (!failure && profile.smoke) {
+        const checked = await smokeCheck(profile.smoke, profile.smoke_timeout * 1000);
+        log(`\nSmoke check ${profile.smoke}: ${checked.ok ? `HTTP ${checked.status}` : checked.reason}`);
+        if (!checked.ok) failure = { step: 'smoke', reason: checked.reason };
+      }
+
+      const result = {
+        state: failure ? 'failed' : 'ok',
+        commit: head,
+        at: now(),
+        ...(failure ?? {}),
+        ...(profile.smoke ? { url: profile.smoke } : {}),
+        log: logPath,
+      };
+      const jobs = recordDeploy(job, lastOk, result);
+      out({ ...result, jobs });
+      if (failure) process.exit(1);
+    } finally {
+      release(DEPLOY_LOCK);
+    }
+  },
+
   next() {
     const board = readBoard();
     const claimed = new Set(
@@ -588,7 +706,7 @@ const commands = {
   },
 };
 
-const FLAGS = new Set(['open', 'stop']); // options without a value
+const FLAGS = new Set(['open', 'stop', 'human']); // options without a value
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -608,6 +726,6 @@ if (!command || !commands[command]) {
   fail(`usage: board.mjs <${Object.keys(commands).join('|')}> ...`, 2);
 }
 // Long-running commands take the lock only around their own board writes.
-const UNLOCKED = new Set(['setup', 'verify', 'preview', 'list', 'show', 'paths', 'jobs', 'next', 'register', 'unregister', 'projects']);
+const UNLOCKED = new Set(['setup', 'verify', 'preview', 'deploy', 'list', 'show', 'paths', 'jobs', 'next', 'register', 'unregister', 'projects']);
 if (UNLOCKED.has(command)) await commands[command](parseArgs(rest));
 else withLock(() => commands[command](parseArgs(rest)));

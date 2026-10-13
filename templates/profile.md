@@ -4,6 +4,14 @@ max_rounds: 2
 setup: npm ci --prefer-offline --no-audit --no-fund
 verify: npm test
 preview: npm run dev -- --port $FACTORY_PORT
+# Deploy after each merge (delete what does not apply; see docs/INSTALL.md in the plugin):
+# deploy: git push origin main
+# deploy_wait: github-actions
+# smoke: https://example.com/
+# migrate: npx supabase db push
+# migrations: [supabase/migrations/]
+# human_only: [supabase/migrations/]
+# deploy_when: auto
 reviewers: [code, experience]
 model_code: sonnet
 model_experience: sonnet
